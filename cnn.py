@@ -302,19 +302,14 @@ class CNN:
 # Helper: initialize an encoder-decoder image-to-image CNN
 # ---------------------------------------------------------------------
 
-def init_image_to_image_cnn(input_shape,
-                            num_filters=(32, 64, 64),
-                            num_output_channels=None,
-                            rng=None):
+def init_simple_image_to_image_cnn(input_shape,
+                                   num_filters=(32, 64),
+                                   num_output_channels=None,
+                                   rng=None):
     """
-    Convenience function to build W_list, b_list, lname for an encoder-decoder.
-
-    input_shape: (H, W, C_in)
-    num_filters: sequence of conv filters for encoder (and decoder)
-    num_output_channels: defaults to C_in if None
-    rng: np.random.RandomState or None
-
-    Returns: W_list, b_list, lname
+    Very simple image-to-image CNN:
+        [conv -> conv -> ... -> conv_out]
+    All convs use 'same' padding, so H,W stay the same.
     """
     if rng is None:
         rng = np.random.RandomState(123)
@@ -329,45 +324,18 @@ def init_image_to_image_cnn(input_shape,
     b_list = []
     lname = []
 
-    # ----- Encoder: [conv + pool] * len(num_filters) -----
     C_prev = C_in
+    # Hidden conv layers
     for nf in num_filters:
-        # conv
         Wc = rng.randn(3, 3, C_prev, nf).astype(np.float32) * \
             np.sqrt(2.0 / (3 * 3 * C_prev))
         bc = np.zeros((nf,), dtype=np.float32)
         W_list.append(Wc)
         b_list.append(bc)
         lname.append("conv")
-
-        # pool
-        W_list.append(None)
-        b_list.append(None)
-        lname.append("pool")
-
         C_prev = nf
 
-    # ----- Decoder: mirror except final layer -----
-    # we won't upsample after the last encoder filter (bottleneck)
-    decoder_filters = list(num_filters[:-1])[::-1]
-
-    for nf in decoder_filters:
-        # upsample
-        W_list.append(None)
-        b_list.append(None)
-        lname.append("upsample")
-
-        # conv
-        Wc = rng.randn(3, 3, C_prev, nf).astype(np.float32) * \
-            np.sqrt(2.0 / (3 * 3 * C_prev))
-        bc = np.zeros((nf,), dtype=np.float32)
-        W_list.append(Wc)
-        b_list.append(bc)
-        lname.append("conv")
-
-        C_prev = nf
-
-    # ----- Final conv to get desired output channels (no activation) -----
+    # Final conv_out to go back to C_out channels
     Wc = rng.randn(3, 3, C_prev, C_out).astype(np.float32) * \
         np.sqrt(2.0 / (3 * 3 * C_prev))
     bc = np.zeros((C_out,), dtype=np.float32)
