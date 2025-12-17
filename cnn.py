@@ -3,6 +3,9 @@
 # Keeps your list-of-layers structure and adds backprop + fit() so you can train >= 5 epochs.
 
 import numpy as np
+import csv
+import os
+import time
 
 # ---------------------------------------------------------------------
 # Activation functions and helpers
@@ -444,16 +447,14 @@ class CNN:
             clip_grad=None,
             x_val=None, y_val=None,
             verbose=True,
-            bar_len=25):
+            bar_len=25,
+            csv_path=None,
+            model_name="cnn"):
+        
         """
-        Train for multiple epochs with a Keras-like per-batch progress display.
-        Uses _print_progress(...).
+        Train the model and optionally log epoch results to a CSV file.
+        """
 
-        Returns
-        -------
-        history : dict
-            Keys: 'train_loss' and optionally 'val_loss'
-        """
         history = {"train_loss": []}
         use_val = (x_val is not None and y_val is not None)
         if use_val:
@@ -467,7 +468,25 @@ class CNN:
         n_train = x_train.shape[0]
         total_steps = int(np.ceil(n_train / batch_size))
 
+        # ---- CSV setup ----
+        if csv_path is not None:
+            write_header = not os.path.exists(csv_path)
+            csv_file = open(csv_path, "a", newline="")
+            csv_writer = csv.writer(csv_file)
+            if write_header:
+                csv_writer.writerow([
+                    "model",
+                    "epoch",
+                    "train_loss",
+                    "val_loss",
+                    "psnr",
+                    "epoch_time_sec",
+                    "learning_rate",
+                    "batch_size"
+                ])
+
         for ep in range(epochs):
+            start_time = time.time()
             running_sum = 0.0
             steps = 0
 
@@ -477,32 +496,68 @@ class CNN:
             ):
                 batch_loss = self.train_step(xb, yb, lr=lr, clip_grad=clip_grad)
 
-                running_sum += float(batch_loss)
+                running_sum += batch_loss
                 steps = step
                 avg_loss = running_sum / steps
 
                 if verbose:
-                    _print_progress(ep + 1, epochs, step, total_steps, batch_loss, avg_loss, bar_len=bar_len)
+                    frac = step / total_steps
+                    filled = int(bar_len * frac)
+                    bar = "=" * filled + ">" + "." * (bar_len - filled - 1)
+                    pct = int(frac * 100)
+                    print(
+                        f"\rEpoch {ep+1}/{epochs} "
+                        f"[{bar}] {pct:3d}%  "
+                        f"batch_loss={batch_loss:.4e}  "
+                        f"avg_loss={avg_loss:.4e}",
+                        end="",
+                        flush=True
+                    )
 
-            # end of epoch
-            train_loss = (running_sum / steps) if steps > 0 else float("nan")
+            train_loss = running_sum / steps
             history["train_loss"].append(float(train_loss))
 
             if verbose:
-                print()  # newline after the progress bar
+                print()
 
+            # ---- Validation ----
+            val_loss = None
+            psnr = None
             if use_val:
                 y_pred = self.feedforward(x_val, batch_size=batch_size)
                 val_loss, _ = mse_loss(y_pred, y_val)
                 history["val_loss"].append(float(val_loss))
 
+                mse = val_loss
+                psnr = 10.0 * np.log10((1.0 ** 2) / (mse + 1e-8))
+
                 if verbose:
-                    print(f"           val_loss={val_loss:.4e}")
+                    print(f"           val_loss={val_loss:.4e}  psnr={psnr:.2f} dB")
             else:
                 if verbose:
                     print(f"           train_loss={train_loss:.4e}")
 
+            epoch_time = time.time() - start_time
+
+            # ---- CSV write ----
+            if csv_path is not None:
+                csv_writer.writerow([
+                    model_name,
+                    ep + 1,
+                    train_loss,
+                    val_loss,
+                    psnr,
+                    epoch_time,
+                    lr,
+                    batch_size
+                ])
+                csv_file.flush()
+
+        if csv_path is not None:
+            csv_file.close()
+
         return history
+
     # -------------------------- evaluation --------------------------- #
 
     def evaluate(self, x, y_true, metric="mse", batch_size=None, max_val=1.0):
